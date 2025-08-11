@@ -186,7 +186,7 @@ class EtisalatPaymentGatewaySettings(Document):
 			raise e
 
 	def get_epg_request_params(self):
-		token_str = f"{self.api_username}:{self.get_password("api_password")}"
+		token_str = f"{self.api_username}:{self.get_password('api_password')}"
 		token = b64encode(token_str.encode()).decode("utf-8")
 
 		headers = frappe._dict({
