@@ -111,12 +111,12 @@ class EtisalatPaymentGatewaySettings(Document):
 
 			return transaction.get("InvoiceURL")
 
-		except Exception as e:
+		except Exception:
 			integration_request.db_set({
 				"status": "Failed",
-				"error": str(e),
+				"error": frappe.get_traceback(),
 			}, commit=True)
-			raise e
+			raise
 
 	def handle_transaction_webhook(self, data):
 		webhook_request = create_request_log(
@@ -130,7 +130,15 @@ class EtisalatPaymentGatewaySettings(Document):
 			if not encrypted_transaction:
 				frappe.throw(_("eInvoiceTransactionDetails is not provided"))
 
-			transaction_json = decrypt_aes_cbc(encrypted_transaction, self.get_password("decryption_key"))
+			decryption_key = self.get_password("decryption_key").encode("utf-8")
+			key = decryption_key[:32]
+			iv = decryption_key[32:]
+
+			transaction_json = decrypt_aes_cbc(encrypted_transaction, key, iv=iv)
+
+			data["eInvoiceTransactionDetails_decrypted"] = transaction_json
+			webhook_request.db_set("data", get_json(data), commit=True)
+
 			transaction = json.loads(transaction_json)
 
 			data["eInvoiceTransactionDetails_decrypted"] = transaction
@@ -143,7 +151,7 @@ class EtisalatPaymentGatewaySettings(Document):
 
 			original_request = frappe.db.get_value("Integration Request", {
 				"request_id": transaction.get("InvoiceID"),
-				"service_name": "Etisalat Payment Gateway",
+				"integration_request_service": "Etisalat Payment Gateway",
 				"is_remote_request": 0,
 			})
 			if not original_request:
@@ -160,13 +168,13 @@ class EtisalatPaymentGatewaySettings(Document):
 			# Check Amount
 			# TODO
 
-			if transaction.get("ResponseCode") == "0":
+			if transaction.get("TransactionResponseCode") == "0":
 				webhook_request.db_set("status", "Authorized", commit=True)
 				original_request.db_set("status", "Authorized", commit=True)
 
 				frappe.flags.data = data
-				if original_request.reference_doctype and original_request.reference_name:
-					reference_doc = frappe.get_doc(data.get("reference_doctype"), data.get("reference_docname"))
+				if original_request.reference_doctype and original_request.reference_docname:
+					reference_doc = frappe.get_doc(original_request.reference_doctype, original_request.reference_docname)
 					reference_doc.run_method("on_payment_authorized", "Completed")
 					frappe.db.commit()
 
@@ -175,15 +183,15 @@ class EtisalatPaymentGatewaySettings(Document):
 			else:
 				webhook_request.db_set({
 					"status": "Failed",
-					"error": transaction.get("ResponseDescription"),
+					"error": transaction.get("TransactionResponseDescription"),
 				}, commit=True)
 
-		except Exception as e:
+		except Exception:
 			webhook_request.db_set({
 				"status": "Failed",
-				"error": str(e),
+				"error": frappe.get_traceback(),
 			}, commit=True)
-			raise e
+			raise
 
 	def get_epg_request_params(self):
 		token_str = f"{self.api_username}:{self.get_password('api_password')}"
@@ -203,6 +211,8 @@ class EtisalatPaymentGatewaySettings(Document):
 
 @frappe.whitelist(allow_guest=True, xss_safe=True)
 def transaction_status_webhook(**kwargs):
+	frappe.set_user("Administrator")
+
 	try:
 		data = frappe._dict(kwargs)
 		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
@@ -217,25 +227,13 @@ def transaction_status_webhook(**kwargs):
 	}
 
 
-def decrypt_aes_cbc(encrypted_data_b64, key):
+def decrypt_aes_cbc(encrypted_data_b64, key, iv):
 	from Crypto.Cipher import AES
 	from Crypto.Util.Padding import unpad
 
-	"""
-	Decrypts AES CBC encrypted data.
-
-	Args:
-		encrypted_data_b64 (str): Base64 encoded encrypted data (including IV).
-		key (bytes): The secret key used for encryption.
-
-	Returns:
-		str: The decrypted plaintext.
-	"""
 	encrypted_data = b64decode(encrypted_data_b64)
-	iv = encrypted_data[:AES.block_size]
-	ciphertext = encrypted_data[AES.block_size:]
 
 	cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-	decrypted_padded_data = cipher.decrypt(ciphertext)
+	decrypted_padded_data = cipher.decrypt(encrypted_data)
 	plaintext_bytes = unpad(decrypted_padded_data, AES.block_size)
-	return plaintext_bytes.decode('utf-8')
+	return plaintext_bytes.decode('utf-16')
