@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, get_fullname
 from frappe.model.document import Document
 from payments.utils import create_payment_gateway
 from frappe.integrations.utils import make_post_request, create_request_log, get_json
@@ -46,6 +46,12 @@ class EtisalatPaymentGatewaySettings(Document):
 			reference_doctype=kwargs.get("reference_doctype"),
 			reference_docname=kwargs.get("reference_docname"),
 		)
+
+	def expire_payment_url(self, payment_url, reason=None):
+		if not payment_url:
+			frappe.throw(_("Payment URL is not provided"))
+
+		return self.expire_einvoice(payment_url, reason=reason)
 
 	def generate_einvoice(
 		self,
@@ -113,6 +119,77 @@ class EtisalatPaymentGatewaySettings(Document):
 
 		except Exception:
 			integration_request.db_set({
+				"status": "Failed",
+				"error": frappe.get_traceback(),
+			}, commit=True)
+			raise
+
+	def expire_einvoice(self, payment_url, reason=None):
+		original_request = frappe.db.get_value("Integration Request", {
+			"url": payment_url,
+			"integration_request_service": "Etisalat Payment Gateway",
+			"is_remote_request": 0,
+		})
+		if not original_request:
+			return False
+
+		original_request = frappe.get_doc("Integration Request", original_request)
+		invoice_id = original_request.request_id
+		if not invoice_id:
+			return False
+
+		# if original_request.status in ("Authorized", "Completed"):
+		# 	frappe.throw(_("Cannot expire Payment URL because it's status is {0}").format(
+		# 		original_request.status
+		# 	))
+
+		request_params = self.get_epg_request_params()
+
+		if not reason:
+			reason = "Cancelled by User {0} ({1})".format(
+				get_fullname(frappe.session.user),
+				frappe.session.user,
+			)
+
+		body = {
+			"InvoiceID": invoice_id,
+			"UpdateDetailType": "ExpireLink",
+			"Customer": self.customer_id,
+			"ExtraData": {
+				"LinkExpiredReason": reason
+			}
+		}
+
+		payload = {"UpdateEInvoice": body}
+		expiration_request = create_request_log(
+			payload,
+			service_name="Etisalat Payment Gateway",
+			reference_doctype=original_request.reference_doctype,
+			reference_docname=original_request.reference_docname,
+			request_id=invoice_id,
+		)
+
+		try:
+			response = make_post_request(request_params.url, headers=request_params.headers, json=payload)
+			expiration_request.db_set("output", get_json(response), commit=True)
+
+			# unsucesseful response OR already expired
+			transaction = response.get("Transaction", {})
+			if transaction.get("ResponseCode") not in ("0", "6851"):
+				error_message = _("Failed to expire payment link")
+				error_description = transaction.get("ResponseDescription")
+				if error_description:
+					error_message += ": " + error_description
+
+				frappe.throw(error_message)
+
+			expiration_request.db_set("status", "Completed", commit=True)
+			original_request.db_set("status", "Cancelled", commit=True)
+
+			return True
+
+		except Exception:
+			expiration_request.db_set({
 				"status": "Failed",
 				"error": frappe.get_traceback(),
 			}, commit=True)
