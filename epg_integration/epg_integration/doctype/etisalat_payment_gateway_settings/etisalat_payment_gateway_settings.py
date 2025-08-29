@@ -70,7 +70,7 @@ class EtisalatPaymentGatewaySettings(Document):
 			"Amount": flt(amount),
 			"Currency": currency,
 			"OverrideCapture": "Auto",
-			"RegisterForRecurrence": "True",
+			"RegisterForRecurrence": "False",
 			"InvoiceType": "Once",
 			"CardHolderName": payer_name,
 			"CardHolderEmail": payer_email,
@@ -165,9 +165,6 @@ class EtisalatPaymentGatewaySettings(Document):
 					"reference_docname": original_request.get("reference_docname"),
 				}, commit=True)
 
-			# Check Amount
-			# TODO
-
 			if transaction.get("TransactionResponseCode") == "0":
 				webhook_request.db_set("status", "Authorized", commit=True)
 				original_request.db_set("status", "Authorized", commit=True)
@@ -175,7 +172,11 @@ class EtisalatPaymentGatewaySettings(Document):
 				frappe.flags.data = data
 				if original_request.reference_doctype and original_request.reference_docname:
 					reference_doc = frappe.get_doc(original_request.reference_doctype, original_request.reference_docname)
-					reference_doc.run_method("on_payment_authorized", "Completed")
+					reference_doc.run_method(
+						"on_payment_authorized",
+						"Completed",
+						reference_no=transaction.get("InvoiceID"),
+					)
 					frappe.db.commit()
 
 				webhook_request.db_set("status", "Completed", commit=True)
