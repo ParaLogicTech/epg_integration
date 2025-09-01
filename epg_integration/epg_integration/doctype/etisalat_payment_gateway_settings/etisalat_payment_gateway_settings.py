@@ -3,16 +3,20 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_fullname
+from frappe.utils import flt, get_fullname, combine_datetime, format_datetime
 from frappe.model.document import Document
 from payments.utils import create_payment_gateway
 from frappe.integrations.utils import make_post_request, create_request_log, get_json
 from base64 import b64encode, b64decode
+import datetime
 import json
 
 
 class EtisalatPaymentGatewaySettings(Document):
 	supported_currencies = ("AED", "USD")
+	supports_expiry_date = True
+	supports_expiry_time = True
+
 	production_url = "https://ipg.comtrust.ae:2443"
 	sandbox_url = "https://demo-ipg.ctdev.comtrust.ae:2443"
 
@@ -45,6 +49,8 @@ class EtisalatPaymentGatewaySettings(Document):
 			order_info=kwargs.get("order_info"),
 			reference_doctype=kwargs.get("reference_doctype"),
 			reference_docname=kwargs.get("reference_docname"),
+			expiry_date=kwargs.get("expiry_date"),
+			expiry_time=kwargs.get("expiry_time"),
 		)
 
 	def expire_payment_url(self, payment_url, reason=None):
@@ -65,8 +71,14 @@ class EtisalatPaymentGatewaySettings(Document):
 		order_info=None,
 		reference_doctype=None,
 		reference_docname=None,
+		expiry_date=None,
+		expiry_time=None,
 	):
 		request_params = self.get_epg_request_params()
+
+		expiry_dt = None
+		if expiry_date:
+			expiry_dt = combine_datetime(expiry_date, expiry_time or datetime.time.max)
 
 		body = {
 			"Customer": self.customer_id,
@@ -81,7 +93,7 @@ class EtisalatPaymentGatewaySettings(Document):
 			"CardHolderName": payer_name,
 			"CardHolderEmail": payer_email,
 			"CardHolderMobile": payer_mobile,
-			"MerchantMessage": "No",
+			"ExpiryDate": format_datetime(expiry_dt, "yyyy-MM-dd HH:mm:ss") if expiry_dt else None,
 		}
 
 		payload = {"GenerateEInvoice": body}
