@@ -318,7 +318,10 @@ def transaction_status_webhook(**kwargs):
 		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
 		return settings.handle_transaction_webhook(data)
 	except Exception:
-		frappe.log_error(message=frappe.get_traceback())
+		frappe.log_error(
+			title="Etisalat Payment Gateway Webhook Error",
+			message=frappe.get_traceback(),
+		)
 		raise
 
 
