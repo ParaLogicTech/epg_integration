@@ -268,8 +268,18 @@ class EtisalatPaymentGatewaySettings(Document):
 					)
 					frappe.db.commit()
 
-				webhook_request.db_set("status", "Completed", commit=True)
 				original_request.db_set("status", "Completed", commit=True)
+
+				response = {
+					"ResponseCode": "0",
+					"ResponseDescription": "Request Processed Successfully",
+				}
+				webhook_request.db_set({
+					"status": "Completed",
+					"output": get_json(response),
+				}, commit=True)
+
+				return response
 			else:
 				webhook_request.db_set({
 					"status": "Failed",
@@ -306,15 +316,10 @@ def transaction_status_webhook(**kwargs):
 	try:
 		data = frappe._dict(kwargs)
 		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
-		settings.handle_transaction_webhook(data)
+		return settings.handle_transaction_webhook(data)
 	except Exception:
 		frappe.log_error(message=frappe.get_traceback())
 		raise
-
-	return {
-		"ResponseCode": "0",
-		"ResponseDescription": "Request Processed Successfully",
-	}
 
 
 def decrypt_aes_cbc(encrypted_data_b64, key, iv):
