@@ -287,6 +287,7 @@ class EtisalatPaymentGatewaySettings(Document):
 				}, commit=True)
 
 		except Exception:
+			frappe.db.rollback()
 			webhook_request.db_set({
 				"status": "Failed",
 				"error": frappe.get_traceback(),
