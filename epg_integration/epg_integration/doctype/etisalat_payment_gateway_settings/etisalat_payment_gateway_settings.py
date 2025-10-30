@@ -208,6 +208,10 @@ class EtisalatPaymentGatewaySettings(Document):
 			raise
 
 	def handle_transaction_webhook(self, data):
+		encrypted_transaction = data.get("eInvoiceTransactionDetails")
+		if not encrypted_transaction:
+			frappe.throw(_("eInvoiceTransactionDetails is not provided"))
+
 		webhook_request = create_request_log(
 			data,
 			service_name="Etisalat Payment Gateway",
@@ -215,10 +219,6 @@ class EtisalatPaymentGatewaySettings(Document):
 		)
 
 		try:
-			encrypted_transaction = data.get("eInvoiceTransactionDetails")
-			if not encrypted_transaction:
-				frappe.throw(_("eInvoiceTransactionDetails is not provided"))
-
 			decryption_key = self.get_password("decryption_key").encode("utf-8")
 			key = decryption_key[:32]
 			iv = decryption_key[32:]

@@ -42,7 +42,7 @@
    "fieldname": "customer_id",
    "fieldtype": "Data",
    "label": "Customer ID",
-   "mandatory_depends_on": "eval:!doc.use_sandbox"
+   "reqd": 1
   },
   {
    "fieldname": "decryption_key",
@@ -54,7 +54,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-08-08 11:43:19.092143",
+ "modified": "2025-10-30 12:02:50.577650",
  "modified_by": "Administrator",
  "module": "EPG Integration",
  "name": "Etisalat Payment Gateway Settings",
