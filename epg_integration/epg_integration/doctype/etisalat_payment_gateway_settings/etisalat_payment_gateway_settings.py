@@ -208,10 +208,6 @@ class EtisalatPaymentGatewaySettings(Document):
 			raise
 
 	def handle_transaction_webhook(self, data):
-		encrypted_transaction = data.get("eInvoiceTransactionDetails")
-		if not encrypted_transaction:
-			frappe.throw(_("eInvoiceTransactionDetails is not provided"))
-
 		webhook_request = create_request_log(
 			data,
 			service_name="Etisalat Payment Gateway",
@@ -219,6 +215,10 @@ class EtisalatPaymentGatewaySettings(Document):
 		)
 
 		try:
+			encrypted_transaction = data.get("eInvoiceTransactionDetails")
+			if not encrypted_transaction:
+				frappe.throw(_("eInvoiceTransactionDetails is not provided"))
+
 			decryption_key = self.get_password("decryption_key").encode("utf-8")
 			key = decryption_key[:32]
 			iv = decryption_key[32:]
@@ -311,11 +311,19 @@ class EtisalatPaymentGatewaySettings(Document):
 
 
 @frappe.whitelist(allow_guest=True, xss_safe=True)
-def transaction_status_webhook(**kwargs):
+def transaction_status_webhook():
 	frappe.set_user("Administrator")
 
 	try:
-		data = frappe._dict(kwargs)
+		data = frappe.request.data
+		if not data:
+			frappe.throw(_("No data found in request body"))
+
+		try:
+			data = frappe.parse_json(data.decode("utf-8"))
+		except Exception as e:
+			frappe.throw(_("Error parsing JSON data: {0}".format(repr(e))))
+
 		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
 		return settings.handle_transaction_webhook(data)
 	except Exception:
@@ -330,9 +338,12 @@ def decrypt_aes_cbc(encrypted_data_b64, key, iv):
 	from Crypto.Cipher import AES
 	from Crypto.Util.Padding import unpad
 
-	encrypted_data = b64decode(encrypted_data_b64)
+	try:
+		encrypted_data = b64decode(encrypted_data_b64)
 
-	cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-	decrypted_padded_data = cipher.decrypt(encrypted_data)
-	plaintext_bytes = unpad(decrypted_padded_data, AES.block_size)
-	return plaintext_bytes.decode('utf-16')
+		cipher = AES.new(key, AES.MODE_CBC, iv=iv)
+		decrypted_padded_data = cipher.decrypt(encrypted_data)
+		plaintext_bytes = unpad(decrypted_padded_data, AES.block_size)
+		return plaintext_bytes.decode('utf-16')
+	except Exception as e:
+		frappe.throw(_("Failed to decrypt payload: {0}").format(repr(e)))
