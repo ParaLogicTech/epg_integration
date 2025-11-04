@@ -322,7 +322,9 @@ def transaction_status_webhook():
 		try:
 			data = frappe.parse_json(data.decode("utf-8"))
 		except Exception as e:
-			frappe.throw(_("Error parsing JSON data: {0}".format(repr(e))))
+			frappe.throw(_("Error parsing JSON data ({0}): {1}".format(
+				str(e), data.decode("utf-8")
+			)))
 
 		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
 		return settings.handle_transaction_webhook(data)
