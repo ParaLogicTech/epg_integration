@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_fullname, combine_datetime, format_datetime
+from frappe.utils import flt, cint, cstr, get_fullname, combine_datetime, format_datetime
 from frappe.model.document import Document
 from payments.utils import create_payment_gateway
 from frappe.integrations.utils import make_post_request, create_request_log, get_json
@@ -74,14 +74,15 @@ class EtisalatPaymentGatewaySettings(Document):
 		expiry_date=None,
 		expiry_time=None,
 	):
-		request_params = self.get_epg_request_params()
+		settings = self.get_epg_settings()
+		request_params = self.get_epg_request_params(settings)
 
 		expiry_dt = None
 		if expiry_date:
 			expiry_dt = combine_datetime(expiry_date, expiry_time or datetime.time.max)
 
 		body = {
-			"Customer": self.customer_id,
+			"Customer": settings.customer_id,
 			"OrderID": order_id,
 			"OrderName": order_name or reference_docname or order_id,
 			"OrderInfo": order_info,
@@ -155,7 +156,8 @@ class EtisalatPaymentGatewaySettings(Document):
 		# 		original_request.status
 		# 	))
 
-		request_params = self.get_epg_request_params()
+		settings = self.get_epg_settings()
+		request_params = self.get_epg_request_params(settings)
 
 		if not reason:
 			reason = "Cancelled by User {0} ({1})".format(
@@ -166,7 +168,7 @@ class EtisalatPaymentGatewaySettings(Document):
 		body = {
 			"InvoiceID": invoice_id,
 			"UpdateDetailType": "ExpireLink",
-			"Customer": self.customer_id,
+			"Customer": settings.customer_id,
 			"ExtraData": {
 				"LinkExpiredReason": reason
 			}
@@ -215,11 +217,13 @@ class EtisalatPaymentGatewaySettings(Document):
 		)
 
 		try:
+			settings = self.get_epg_settings()
+
 			encrypted_transaction = data.get("eInvoiceTransactionDetails")
 			if not encrypted_transaction:
 				frappe.throw(_("eInvoiceTransactionDetails is not provided"))
 
-			decryption_key = self.get_password("decryption_key").encode("utf-8")
+			decryption_key = cstr(settings.decryption_key).encode("utf-8")
 			key = decryption_key[:32]
 			iv = decryption_key[32:]
 
@@ -294,8 +298,8 @@ class EtisalatPaymentGatewaySettings(Document):
 			}, commit=True)
 			raise
 
-	def get_epg_request_params(self):
-		token_str = f"{self.api_username}:{self.get_password('api_password')}"
+	def get_epg_request_params(self, settings):
+		token_str = f"{settings.api_username}:{settings.api_password}"
 		token = b64encode(token_str.encode()).decode("utf-8")
 
 		headers = frappe._dict({
@@ -305,9 +309,27 @@ class EtisalatPaymentGatewaySettings(Document):
 		})
 
 		return frappe._dict({
-			"url": self.sandbox_url if self.use_sandbox else self.production_url,
+			"url": self.sandbox_url if settings.use_sandbox else self.production_url,
 			"headers": headers,
 		})
+
+	def get_epg_settings(self):
+		if cint(frappe.conf.get("epg_override_settings")):
+			return frappe._dict({
+				"api_username": frappe.conf.get("epg_api_username"),
+				"api_password": frappe.conf.get("epg_api_password"),
+				"decryption_key": frappe.conf.get("epg_decryption_key"),
+				"customer_id": frappe.conf.get("epg_customer_id"),
+				"use_sandbox": cint(frappe.conf.get("epg_use_sandbox")),
+			})
+		else:
+			return frappe._dict({
+				"api_username": self.api_username,
+				"api_password": self.get_password("api_password"),
+				"decryption_key": self.get_password("decryption_key"),
+				"customer_id": self.customer_id,
+				"use_sandbox": cint(self.use_sandbox),
+			})
 
 
 @frappe.whitelist(allow_guest=True, xss_safe=True)
