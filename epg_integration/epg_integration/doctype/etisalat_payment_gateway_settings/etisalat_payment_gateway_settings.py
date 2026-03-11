@@ -209,13 +209,7 @@ class EtisalatPaymentGatewaySettings(Document):
 			}, commit=True)
 			raise
 
-	def handle_transaction_webhook(self, data):
-		webhook_request = create_request_log(
-			data,
-			service_name="Etisalat Payment Gateway",
-			is_remote_request=1,
-		)
-
+	def process_transaction_webhook(self, data, webhook_request):
 		try:
 			settings = self.get_epg_settings()
 
@@ -259,8 +253,8 @@ class EtisalatPaymentGatewaySettings(Document):
 				}, commit=True)
 
 			if transaction.get("TransactionResponseCode") == "0":
-				webhook_request.db_set("status", "Authorized", commit=True)
 				original_request.db_set("status", "Authorized", commit=True)
+				webhook_request.db_set("status", "Authorized", commit=True)
 
 				frappe.flags.data = data
 				if original_request.reference_doctype and original_request.reference_docname:
@@ -273,17 +267,7 @@ class EtisalatPaymentGatewaySettings(Document):
 					frappe.db.commit()
 
 				original_request.db_set("status", "Completed", commit=True)
-
-				response = {
-					"ResponseCode": "0",
-					"ResponseDescription": "Request Processed Successfully",
-				}
-				webhook_request.db_set({
-					"status": "Completed",
-					"output": get_json(response),
-				}, commit=True)
-
-				return response
+				webhook_request.db_set("status", "Completed", commit=True)
 			else:
 				webhook_request.db_set({
 					"status": "Failed",
@@ -336,6 +320,12 @@ class EtisalatPaymentGatewaySettings(Document):
 def transaction_status_webhook():
 	frappe.set_user("Administrator")
 
+	response = {
+		"ResponseCode": "0",
+		"ResponseDescription": "Request Processed Successfully",
+	}
+
+	# Store first if data is valid json, otherwise respond failure
 	try:
 		data = frappe.request.data
 		if not data:
@@ -344,18 +334,59 @@ def transaction_status_webhook():
 		try:
 			data = frappe.parse_json(data.decode("utf-8"))
 		except Exception as e:
-			frappe.throw(_("Error parsing JSON data ({0}): {1}".format(
+			frappe.throw(_("Error parsing JSON data ({0}): {1}").format(
 				str(e), data.decode("utf-8")
-			)))
+			))
 
-		settings = frappe.get_doc("Etisalat Payment Gateway Settings")
-		return settings.handle_transaction_webhook(data)
+		webhook_request = create_request_log(
+			data,
+			service_name="Etisalat Payment Gateway",
+			is_remote_request=1,
+		)
 	except Exception:
 		frappe.log_error(
 			title="Etisalat Payment Gateway Webhook Error",
 			message=frappe.get_traceback(),
 		)
 		raise
+
+	# Process synchronously, allow failure
+	try:
+		settings = frappe.get_single("Etisalat Payment Gateway Settings")
+		settings.process_transaction_webhook(data, webhook_request)
+		webhook_request.db_set("output", get_json(response), commit=True)
+	except Exception:
+		frappe.log_error(
+			title="Etisalat Payment Gateway Webhook Error",
+			message=frappe.get_traceback(),
+		)
+
+	# Always respond with okay
+	return response
+
+
+@frappe.whitelist()
+def retry_transaction_webhook(integration_request):
+	frappe.only_for("System Manager")
+
+	webhook_request = frappe.get_doc("Integration Request", integration_request, for_update=True)
+	webhook_request.check_permission("read")
+
+	if (
+		webhook_request.integration_request_service != "Etisalat Payment Gateway"
+		or webhook_request.status != "Failed"
+		or not webhook_request.is_remote_request
+	):
+		frappe.throw(_("Not a failed webhook request to retry"))
+
+	try:
+		data = frappe.parse_json(webhook_request.data)
+	except Exception as e:
+		frappe.throw(_("Error parsing JSON data: {0}").format(str(e)))
+		raise
+
+	settings = frappe.get_single("Etisalat Payment Gateway Settings")
+	settings.process_transaction_webhook(data, webhook_request)
 
 
 def decrypt_aes_cbc(encrypted_data_b64, key, iv):
