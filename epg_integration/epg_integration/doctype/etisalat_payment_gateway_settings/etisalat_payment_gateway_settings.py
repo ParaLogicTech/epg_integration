@@ -222,14 +222,9 @@ class EtisalatPaymentGatewaySettings(Document):
 			iv = decryption_key[32:]
 
 			transaction_json = decrypt_aes_cbc(encrypted_transaction, key, iv=iv)
-
-			data["eInvoiceTransactionDetails_decrypted"] = transaction_json
-			webhook_request.db_set("data", get_json(data), commit=True)
-
+			webhook_request.db_set("output", transaction_json, commit=True)
 			transaction = json.loads(transaction_json)
-
-			data["eInvoiceTransactionDetails_decrypted"] = transaction
-			webhook_request.db_set("data", get_json(data), commit=True)
+			webhook_request.db_set("output", get_json(transaction), commit=True)
 
 			if not transaction.get("InvoiceID"):
 				frappe.throw(_("InvoiceID is not provided"))
@@ -256,7 +251,7 @@ class EtisalatPaymentGatewaySettings(Document):
 				original_request.db_set("status", "Authorized", commit=True)
 				webhook_request.db_set("status", "Authorized", commit=True)
 
-				frappe.flags.data = data
+				frappe.flags.data = transaction
 				if original_request.reference_doctype and original_request.reference_docname:
 					reference_doc = frappe.get_doc(original_request.reference_doctype, original_request.reference_docname)
 					reference_doc.run_method(
@@ -320,11 +315,6 @@ class EtisalatPaymentGatewaySettings(Document):
 def transaction_status_webhook():
 	frappe.set_user("Administrator")
 
-	response = {
-		"ResponseCode": "0",
-		"ResponseDescription": "Request Processed Successfully",
-	}
-
 	# Store first if data is valid json, otherwise respond failure
 	try:
 		data = frappe.request.data
@@ -354,7 +344,6 @@ def transaction_status_webhook():
 	try:
 		settings = frappe.get_single("Etisalat Payment Gateway Settings")
 		settings.process_transaction_webhook(data, webhook_request)
-		webhook_request.db_set("output", get_json(response), commit=True)
 	except Exception:
 		frappe.log_error(
 			title="Etisalat Payment Gateway Webhook Error",
@@ -362,7 +351,10 @@ def transaction_status_webhook():
 		)
 
 	# Always respond with okay
-	return response
+	return {
+		"ResponseCode": "0",
+		"ResponseDescription": "Request Processed Successfully",
+	}
 
 
 @frappe.whitelist()
