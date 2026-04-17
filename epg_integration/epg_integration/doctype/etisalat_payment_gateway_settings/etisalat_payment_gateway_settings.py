@@ -262,7 +262,7 @@ class EtisalatPaymentGatewaySettings(Document):
 					reference_doc.run_method(
 						"on_payment_authorized",
 						"Completed",
-						reference_no=transaction.get("InvoiceID"),
+						reference_no=transaction.get("ApprovalCode") or transaction.get("InvoiceID"),
 					)
 					frappe.db.commit()
 
