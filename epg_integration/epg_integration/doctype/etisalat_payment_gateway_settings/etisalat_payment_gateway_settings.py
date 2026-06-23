@@ -344,10 +344,7 @@ def transaction_status_webhook():
 			is_remote_request=1,
 		)
 	except Exception:
-		frappe.log_error(
-			title="Etisalat Payment Gateway Webhook Error",
-			message=frappe.get_traceback(),
-		)
+		frappe.log_error(title="Etisalat Payment Gateway Webhook Error")
 		raise
 
 	# Process synchronously, allow failure
@@ -355,10 +352,7 @@ def transaction_status_webhook():
 		settings = frappe.get_single("Etisalat Payment Gateway Settings")
 		settings.process_transaction_webhook(data, webhook_request)
 	except Exception:
-		frappe.log_error(
-			title="Etisalat Payment Gateway Webhook Error",
-			message=frappe.get_traceback(),
-		)
+		frappe.log_error(title="Etisalat Payment Gateway Webhook Error")
 
 	try:
 		webhook_request.db_set("output", get_json(response), commit=True)
