@@ -258,7 +258,11 @@ class EtisalatPaymentGatewaySettings(Document):
 
 				frappe.flags.data = data
 				if original_request.reference_doctype and original_request.reference_docname:
-					reference_doc = frappe.get_doc(original_request.reference_doctype, original_request.reference_docname)
+					reference_doc = frappe.get_doc(
+						original_request.reference_doctype,
+						original_request.reference_docname,
+						for_update=True,
+					)
 					reference_doc.run_method(
 						"on_payment_authorized",
 						"Completed",
